@@ -112,7 +112,6 @@ def create_session (APIURL, Username, PasswordString):
 def print_download_progress(offset, orchestrator_connection: OrchestratorConnection):
     orchestrator_connection.log_info("Downloaded '{0}' bytes...".format(offset))
 
-# Process SharePoint folders and upload files
 def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, username, password, session, orchestrator_connection: OrchestratorConnection, case_id):
     ctx = sharepoint_client(username, password, sharepoint_site_url, orchestrator_connection)
 
@@ -188,19 +187,42 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
                         raise Exception("No DocId")
                 except Exception as e:
                     orchestrator_connection.log_info(f"Failed to upload {file['Name']}: {e}")
-                    # Retry with large upload
-                    orchestrator_connection.log_info("Retrying with large upload...")
-                    if folder_path not in created_folders:
-                        orchestrator_connection.log_info(f"Creating folder: {folder_path}")
-                        create_and_delete_placeholder(go_api_url, case_id, str(folder_path).replace("\\","/"), session, orchestrator_connection)
-                        created_folders.add(folder_path)
+                    max_retries = 3
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            orchestrator_connection.log_info(f"Retry attempt {attempt} for {file['Name']} after error: {e}")
+                            orchestrator_connection.log_info("Retrying with large upload...")
 
-                    large_response = upload_large_document(go_api_url, payload, session, file_content, orchestrator_connection)
-                    large_response_json = json.loads(large_response)  # Parse the JSON string
-                    if "DocId" in large_response_json:
-                        folder_doc_ids.append((large_response_json["DocId"], file['Name']))
-                    else:
-                        raise Exception(f"Failed upload for file: {file['Name']} in {folder_path}")
+                            if folder_path not in created_folders:
+                                orchestrator_connection.log_info(f"Creating folder: {folder_path}")
+                                create_and_delete_placeholder(
+                                    go_api_url,
+                                    case_id,
+                                    str(folder_path).replace("\\", "/"),
+                                    session,
+                                    orchestrator_connection
+                                )
+                                created_folders.add(folder_path)
+
+                            large_response = upload_large_document(
+                                go_api_url,
+                                payload,
+                                session,
+                                file_content,
+                                orchestrator_connection
+                            )
+                            large_response_json = json.loads(large_response)
+
+                            if "DocId" in large_response_json:
+                                folder_doc_ids.append((large_response_json["DocId"], file['Name']))
+                                break  
+                            else:
+                                raise Exception(f"Failed upload for file: {file['Name']} in {folder_path}")
+                        except Exception as retry_exception:
+                            if attempt == max_retries:
+                                raise retry_exception  
+                            else:
+                                orchestrator_connection.log_info(f"Retry {attempt} failed: {retry_exception}")
 
             # Sort files by ascending order of their filenames
             folder_doc_ids.sort(key=lambda x: x[1])
@@ -215,7 +237,6 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
                     orchestrator_connection.log_info(f"Successfully journalized documents for subfolder {folder_path}: {doc_ids_for_journalization}")
                 except Exception as e:
                     orchestrator_connection.log_info(f"Failed to journalize documents for subfolder {folder_path}: {e}")
-
 
 # Journalize the uploaded documents
 def journalize_documents(go_api_url, doc_ids, session: requests.session, orchestrator_connection: OrchestratorConnection):
@@ -374,6 +395,7 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     for item in data:
         if item.get("ViewName") == "AllItems.aspx" and item.get("ListName") == "Dokumenter":
             ViewId = item.get("ViewId")
+            break
 
     if ViewId is None:
         raise ValueError(f"ViewId for AllItems.aspx not found.")
@@ -395,7 +417,6 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={ViewId}&RootFolder={root_folder}"
 
     while True:
-        # Define the payload as a Python dictionary
         payload_dict = {
             "parameters": {
                 "__metadata": {
@@ -417,43 +438,26 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
             }
         }
 
-        # Convert the dictionary to a JSON string
-        payload = json.dumps(payload_dict, indent=4)
+        payload = json.dumps(payload_dict)
 
-        # Make the API request
         response = session.post(url, headers=headers, data=payload)
         response.raise_for_status()
 
         data = response.json()
 
-        # Loop through the rows to find the document
         for row in data.get('Row', []):
             if str(row.get('FileLeafRef')).lower() == str(file_name).lower():
                 orchestrator_connection.log_info(f'DocID: {row.get("DocID")}')
                 return row.get('DocID')
 
-        # If no match found and there's a next href, update the URL and repeat
         next_href = data.get('NextHref')
         if next_href:
-            # Replace "?" with "&" in the next_href
             next_href = next_href.replace("?", "&", 1)
             url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}{next_href}"
             orchestrator_connection.log_info(f"Fetching next page: {url}")
         else:
-            # No more pages and DocID not found
             orchestrator_connection.log_info("DocID not found.")
-            return None
-        
-        orchestrator_connection.log_info(url)
-        response = session.post(url, headers=headers, data=payload)
-        response.raise_for_status()
-
-        data = response.json()
-        for row in data['Row']:
-            if str(row.get('FileLeafRef')).lower() == str(file_name).lower():
-                orchestrator_connection.log_info(f'DocID: {row.get("DocID")}')
-                return row.get('DocID')
-        return None
+            return None 
 
 # Example usage
 def chunk_uploaded(offset, total_size, orchestrator_connection: OrchestratorConnection):

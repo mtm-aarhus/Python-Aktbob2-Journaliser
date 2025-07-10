@@ -159,19 +159,42 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
                         raise Exception("No DocId")
                 except Exception as e:
                     print(f"Failed to upload {file['Name']}: {e}")
-                    # Retry with large upload
-                    print("Retrying with large upload...")
-                    if folder_path not in created_folders:
-                        print(f"Creating folder: {folder_path}")
-                        create_and_delete_placeholder(go_api_url, case_id, str(folder_path).replace("\\","/"), session, orchestrator_connection)
-                        created_folders.add(folder_path)
+                    max_retries = 3
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            print(f"Retry attempt {attempt} for {file['Name']} after error: {e}")
+                            print("Retrying with large upload...")
 
-                    large_response = upload_large_document(go_api_url, payload, session, file_content, orchestrator_connection)
-                    large_response_json = json.loads(large_response)  # Parse the JSON string
-                    if "DocId" in large_response_json:
-                        folder_doc_ids.append((large_response_json["DocId"], file['Name']))
-                    else:
-                        raise Exception(f"Failed upload for file: {file['Name']} in {folder_path}")
+                            if folder_path not in created_folders:
+                                print(f"Creating folder: {folder_path}")
+                                create_and_delete_placeholder(
+                                    go_api_url,
+                                    case_id,
+                                    str(folder_path).replace("\\", "/"),
+                                    session,
+                                    orchestrator_connection
+                                )
+                                created_folders.add(folder_path)
+
+                            large_response = upload_large_document(
+                                go_api_url,
+                                payload,
+                                session,
+                                file_content,
+                                orchestrator_connection
+                            )
+                            large_response_json = json.loads(large_response)
+
+                            if "DocId" in large_response_json:
+                                folder_doc_ids.append((large_response_json["DocId"], file['Name']))
+                                break  
+                            else:
+                                raise Exception(f"Failed upload for file: {file['Name']} in {folder_path}")
+                        except Exception as retry_exception:
+                            if attempt == max_retries:
+                                raise retry_exception  
+                            else:
+                                print(f"Retry {attempt} failed: {retry_exception}")
 
             # Sort files by ascending order of their filenames
             folder_doc_ids.sort(key=lambda x: x[1])
@@ -345,6 +368,7 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     for item in data:
         if item.get("ViewName") == "AllItems.aspx" and item.get("ListName") == "Dokumenter":
             ViewId = item.get("ViewId")
+            break
 
     if ViewId is None:
         raise ValueError(f"ViewId for AllItems.aspx not found.")
@@ -366,7 +390,6 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={ViewId}&RootFolder={root_folder}"
 
     while True:
-        # Define the payload as a Python dictionary
         payload_dict = {
             "parameters": {
                 "__metadata": {
@@ -388,43 +411,26 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
             }
         }
 
-        # Convert the dictionary to a JSON string
-        payload = json.dumps(payload_dict, indent=4)
+        payload = json.dumps(payload_dict)
 
-        # Make the API request
         response = session.post(url, headers=headers, data=payload)
         response.raise_for_status()
 
         data = response.json()
 
-        # Loop through the rows to find the document
         for row in data.get('Row', []):
             if str(row.get('FileLeafRef')).lower() == str(file_name).lower():
                 print(f'DocID: {row.get("DocID")}')
                 return row.get('DocID')
 
-        # If no match found and there's a next href, update the URL and repeat
         next_href = data.get('NextHref')
         if next_href:
-            # Replace "?" with "&" in the next_href
             next_href = next_href.replace("?", "&", 1)
             url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}{next_href}"
             print(f"Fetching next page: {url}")
         else:
-            # No more pages and DocID not found
             print("DocID not found.")
-            return None
-        
-        print(url)
-        response = session.post(url, headers=headers, data=payload)
-        response.raise_for_status()
-
-        data = response.json()
-        for row in data['Row']:
-            if str(row.get('FileLeafRef')).lower() == str(file_name).lower():
-                print(f'DocID: {row.get("DocID")}')
-                return row.get('DocID')
-        return None
+            return None 
 
 # Example usage
 def chunk_uploaded(offset, total_size, orchestrator_connection: OrchestratorConnection):
@@ -507,12 +513,20 @@ password = robot_user.password
 
 go_username = go_api_login.username
 go_password = go_api_login.password
-Overmappenavn = "2089 - TESTNY Anmodning om aktindsigt i forbindelse med planlægningen af grønne områder i midtbyen"
-Aktindsigtssag = "AKT-2024-000969"
+json_queue = json.loads("""{
+    "Aktindsigtssag": "AKT-1234-567890",
+    "Email": "test@aarhus.dk",
+    "Navn": "test",
+    "DeskproID": 1234,
+    "Overmappenavn": "1234 - Aktindsigt"
+}""")
+Overmappenavn = json_queue.get("Overmappenavn")
+Aktindsigtssag = json_queue.get("Aktindsigtssag")
+
 sharepoint_folders = [
 #f"Delte dokumenter/Dokumentlister/{Overmappenavn}",
 f"Delte dokumenter/Aktindsigter/{Overmappenavn}"
-]
+    ]
 session = create_session(go_api_url, go_username, go_password)
 
 process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, username, password, session, orchestrator_connection, Aktindsigtssag)
