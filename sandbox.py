@@ -90,6 +90,9 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
     created_folders = set()  # Keep track of created folders
     today_date = datetime.now().strftime("%d-%m-%Y")
 
+    TARGET_NAME = "0034 - D2025-248030 - 24086Hellerupvej 2 8000 Aarhus C Myndighedsprojekt d 15072025pdf 10 15072025 0904.pdf"
+    skip_until_target = True
+    
     for folder_url in folders:
         print(f"Processing top-level folder: {folder_url}")
         files = fetch_files_in_folder(ctx, folder_url)
@@ -101,15 +104,22 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
             if folder_path not in files_by_subfolder:
                 files_by_subfolder[folder_path] = []
             files_by_subfolder[folder_path].append(file)
+            
 
         # Process each subfolder separately
         for folder_path, folder_files in files_by_subfolder.items():
             print(f"Processing subfolder: {folder_path}")
+            
 
             folder_doc_ids = []
 
             for file in folder_files:
+                
                 print(f"Uploading file: {file['Name']} in {folder_path}")
+                if skip_until_target:
+                    if str(file["Name"]).strip().lower() != TARGET_NAME.strip().lower():
+                        continue
+                    skip_until_target = False  # we found it; process this and everything after
 
                 # Download the file content
                 try:      
@@ -282,15 +292,15 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
     print(request_digest)
 
     web_url = APIURL+"/"+case_url
-    if folder_path != None:
-        target_folder_url = "/"+case_url+"/Dokumenter/"+folder_path
+    if folder_path is not None:
+        target_folder_url = f"/{case_url}/Dokumenter/{folder_path}".replace("\\", "/")
     else:
-        target_folder_url = "/"+case_url + "/Dokumenter"
+        target_folder_url = f"/{case_url}/Dokumenter"
+        
+    create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl=@p)/Files/add(url=@f,overwrite=true)?@p='{target_folder_url}'&@f='{file_name}'"
 
-    target_folder_url = target_folder_url.replace("/", "%2F")
 
-
-    create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl='{target_folder_url}')/Files/add(url='{file_name}',overwrite=true)"
+    #create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl='{target_folder_url}')/Files/add(url='{file_name}',overwrite=true)"
     response = session.post(create_file_request_url)
     response.raise_for_status()  # Ensure file creation is successful
 
@@ -311,32 +321,41 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
             if first_chunk and len(buffer) == total_size:
                 # If the file fits in a single chunk, handle it differently
                 # StartUpload and FinishUpload in one step
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
+                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
+
+                
+                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
                 print(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
 
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
+                endpoint_url =  f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
                 print(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
                 break  # Upload complete
             elif first_chunk:
                 # StartUpload: Initiating the upload session for large files
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
+                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
+
+                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
                 print(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
                 first_chunk = False
             elif input_stream.tell() == total_size:
                 # FinishUpload: Upload the final chunk for large files
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
+                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
+
+                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
                 print(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
             else:
                 # ContinueUpload: Upload subsequent chunks
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
+                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
+
+                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
                 print(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
@@ -478,20 +497,7 @@ def upload_large_document(APIURL, payload, session, binary, orchestrator_connect
     case_url = get_case_type(APIURL, session, case_id)
     request_digest = request_form_digest(APIURL, case_url, session)
     file_name = file_name.replace("'", "''")
-    file_name = file_name.replace("%", "%25")
-    file_name = file_name.replace("+", "%2B")
-    file_name = file_name.replace("/", "%2F")
-    file_name = file_name.replace("?", "%3F")
-    file_name = file_name.replace("#", "%23")
-    file_name = file_name.replace("&", "%26")
-
     folder_path = folder_path.replace("'", "''")
-    folder_path = folder_path.replace("%", "%25")
-    folder_path = folder_path.replace("+", "%2B")
-    folder_path = folder_path.replace("/", "%2F")
-    folder_path = folder_path.replace("?", "%3F")
-    folder_path = folder_path.replace("#", "%23")
-    folder_path = folder_path.replace("&", "%26")
 
     chunked_file_upload(APIURL, case_url, binary, file_name, session, request_digest, folder_path, orchestrator_connection)
     time.sleep(5)
@@ -514,11 +520,11 @@ password = robot_user.password
 go_username = go_api_login.username
 go_password = go_api_login.password
 json_queue = json.loads("""{
-    "Aktindsigtssag": "AKT-1234-567890",
-    "Email": "test@aarhus.dk",
-    "Navn": "test",
-    "DeskproID": 1234,
-    "Overmappenavn": "1234 - Aktindsigt"
+    "Aktindsigtssag": "AKT-2025-000836",
+    "Email": "nanstr@aarhus.dk",
+    "Navn": "Nanna Strunk",
+    "DeskproID": 2385,
+    "Overmappenavn": "2385 - Aktindsigt ift klarlæggelse af bevaringsværdi og byggetilladelse"
 }""")
 Overmappenavn = json_queue.get("Overmappenavn")
 Aktindsigtssag = json_queue.get("Aktindsigtssag")
