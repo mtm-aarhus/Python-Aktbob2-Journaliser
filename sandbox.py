@@ -90,7 +90,7 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
     created_folders = set()  # Keep track of created folders
     today_date = datetime.now().strftime("%d-%m-%Y")
 
-    TARGET_NAME = "0034 - D2025-248030 - 24086Hellerupvej 2 8000 Aarhus C Myndighedsprojekt d 15072025pdf 10 15072025 0904.pdf"
+    TARGET_NAME = "Filenamethatfailsfordebug.pdf"
     skip_until_target = True
     
     for folder_url in folders:
