@@ -520,11 +520,7 @@ password = robot_user.password
 go_username = go_api_login.username
 go_password = go_api_login.password
 json_queue = json.loads("""{
-    "Aktindsigtssag": "AKT-2025-000836",
-    "Email": "nanstr@aarhus.dk",
-    "Navn": "Nanna Strunk",
-    "DeskproID": 2385,
-    "Overmappenavn": "2385 - Aktindsigt ift klarlæggelse af bevaringsværdi og byggetilladelse"
+queue element from pyorchestrator
 }""")
 Overmappenavn = json_queue.get("Overmappenavn")
 Aktindsigtssag = json_queue.get("Aktindsigtssag")
