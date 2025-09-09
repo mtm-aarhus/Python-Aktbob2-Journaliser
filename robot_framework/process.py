@@ -25,11 +25,15 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     sharepoint_site_url = orchestrator_connection.get_constant("AktbobSharePointUrl").value
     go_api_url = orchestrator_connection.get_constant("GOApiURL").value
     go_api_login = orchestrator_connection.get_credential("GOAktApiUser")
-    robot_user = orchestrator_connection.get_credential("Robot365User")
-    username = robot_user.username
-    password = robot_user.password
+    certification = orchestrator_connection.get_credential("SharePointCert")
+    api = orchestrator_connection.get_credential("SharePointAPI")
     go_username = go_api_login.username
     go_password = go_api_login.password
+    
+    tenant = api.username
+    client_id = api.password
+    thumbprint = certification.username
+    cert_path = certification.password
     
     json_queue = json.loads(queue_element.data)
     Overmappenavn = json_queue.get("Overmappenavn")
@@ -41,15 +45,21 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     ]
     session = create_session(go_api_url, go_username, go_password)
 
-    process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, username, password, session, orchestrator_connection, Aktindsigtssag)
+    process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, tenant, client_id, thumbprint, cert_path, session, orchestrator_connection, Aktindsigtssag)
     
 
-def sharepoint_client(username: str, password: str, sharepoint_site_url: str, orchestrator_connection: OrchestratorConnection) -> ClientContext:
+def sharepoint_client(tenant: str, client_id: str, thumbprint: str, cert_path: str, sharepoint_site_url: str, orchestrator_connection: OrchestratorConnection) -> ClientContext:
     """
     Creates and returns a SharePoint client context.
     """
     # Authenticate to SharePoint
-    ctx = ClientContext(sharepoint_site_url).with_credentials(UserCredential(username, password))
+    cert_credentials = {
+        "tenant": tenant,
+        "client_id": client_id,
+        "thumbprint": thumbprint,
+        "cert_path": cert_path
+    }
+    ctx = ClientContext(sharepoint_site_url).with_client_certificate(**cert_credentials)
 
     # Load and verify connection
     web = ctx.web
@@ -58,6 +68,7 @@ def sharepoint_client(username: str, password: str, sharepoint_site_url: str, or
 
     orchestrator_connection.log_info(f"Authenticated successfully. Site Title: {web.properties['Title']}")
     return ctx
+
 
 def fetch_files_in_folder(ctx: ClientContext, folder_url, base_folder=""):
     files_array = []
@@ -112,8 +123,8 @@ def create_session (APIURL, Username, PasswordString):
 def print_download_progress(offset, orchestrator_connection: OrchestratorConnection):
     orchestrator_connection.log_info("Downloaded '{0}' bytes...".format(offset))
 
-def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, username, password, session, orchestrator_connection: OrchestratorConnection, case_id):
-    ctx = sharepoint_client(username, password, sharepoint_site_url, orchestrator_connection)
+def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, tenant, client_id, thumbprint, cert_path, session, orchestrator_connection: OrchestratorConnection, case_id):
+    ctx = sharepoint_client(tenant, client_id, thumbprint, cert_path,sharepoint_site_url, orchestrator_connection)
 
     created_folders = set()  # Keep track of created folders
     today_date = datetime.now().strftime("%d-%m-%Y")

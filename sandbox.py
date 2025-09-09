@@ -15,12 +15,18 @@ import uuid
 import xml.etree.ElementTree as ET
 
 
-def sharepoint_client(username: str, password: str, sharepoint_site_url: str, orchestrator_connection: OrchestratorConnection) -> ClientContext:
+def sharepoint_client(tenant: str, client_id: str, thumbprint: str, cert_path: str, sharepoint_site_url: str, orchestrator_connection: OrchestratorConnection) -> ClientContext:
     """
     Creates and returns a SharePoint client context.
     """
     # Authenticate to SharePoint
-    ctx = ClientContext(sharepoint_site_url).with_credentials(UserCredential(username, password))
+    cert_credentials = {
+        "tenant": tenant,
+        "client_id": client_id,
+        "thumbprint": thumbprint,
+        "cert_path": cert_path
+    }
+    ctx = ClientContext(sharepoint_site_url).with_client_certificate(**cert_credentials)
 
     # Load and verify connection
     web = ctx.web
