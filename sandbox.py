@@ -15,6 +15,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 
+
 def sharepoint_client(tenant: str, client_id: str, thumbprint: str, cert_path: str, sharepoint_site_url: str, orchestrator_connection: OrchestratorConnection) -> ClientContext:
     """
     Creates and returns a SharePoint client context.
@@ -35,6 +36,7 @@ def sharepoint_client(tenant: str, client_id: str, thumbprint: str, cert_path: s
 
     orchestrator_connection.log_info(f"Authenticated successfully. Site Title: {web.properties['Title']}")
     return ctx
+
 
 def fetch_files_in_folder(ctx: ClientContext, folder_url, base_folder=""):
     files_array = []
@@ -87,20 +89,19 @@ def create_session (APIURL, Username, PasswordString):
     return session
 
 def print_download_progress(offset, orchestrator_connection: OrchestratorConnection):
-    print("Downloaded '{0}' bytes...".format(offset))
+    orchestrator_connection.log_info("Downloaded '{0}' bytes...".format(offset))
 
-# Process SharePoint folders and upload files
-def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, username, password, session, orchestrator_connection: OrchestratorConnection, case_id):
-    ctx = sharepoint_client(username, password, sharepoint_site_url, orchestrator_connection)
+def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, tenant, client_id, thumbprint, cert_path, session, orchestrator_connection: OrchestratorConnection, case_id):
+    ctx = sharepoint_client(tenant, client_id, thumbprint, cert_path,sharepoint_site_url, orchestrator_connection)
 
     created_folders = set()  # Keep track of created folders
     today_date = datetime.now().strftime("%d-%m-%Y")
-
-    TARGET_NAME = "Filenamethatfailsfordebug.pdf"
-    skip_until_target = True
     
+    timestamp = time.time()  
+
+
     for folder_url in folders:
-        print(f"Processing top-level folder: {folder_url}")
+        orchestrator_connection.log_info(f"Processing top-level folder: {folder_url}")
         files = fetch_files_in_folder(ctx, folder_url)
 
         # Group files by their subfolder paths
@@ -110,29 +111,22 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
             if folder_path not in files_by_subfolder:
                 files_by_subfolder[folder_path] = []
             files_by_subfolder[folder_path].append(file)
-            
 
         # Process each subfolder separately
         for folder_path, folder_files in files_by_subfolder.items():
-            print(f"Processing subfolder: {folder_path}")
-            
+            orchestrator_connection.log_info(f"Processing subfolder: {folder_path}")
 
             folder_doc_ids = []
 
             for file in folder_files:
-                
-                print(f"Uploading file: {file['Name']} in {folder_path}")
-                if skip_until_target:
-                    if str(file["Name"]).strip().lower() != TARGET_NAME.strip().lower():
-                        continue
-                    skip_until_target = False  # we found it; process this and everything after
+                orchestrator_connection.log_info(f"Uploading file: {file['Name']} in {folder_path}")
 
                 # Download the file content
                 try:      
                     sp_file = File.open_binary(ctx, file['ServerRelativeUrl'])
                     file_content = sp_file.content
                 except:
-                    print("Downloading file failed, trying large file download from unique id")
+                    orchestrator_connection.log_info("Downloading file failed, trying large file download from unique id")
                     large_file = ctx.web.get_file_by_id(file['UniqueId'])
                     local_filename = file['Name']
                     
@@ -174,15 +168,15 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
                     else:
                         raise Exception("No DocId")
                 except Exception as e:
-                    print(f"Failed to upload {file['Name']}: {e}")
+                    orchestrator_connection.log_info(f"Failed to upload {file['Name']}: {e}")
                     max_retries = 3
                     for attempt in range(1, max_retries + 1):
                         try:
-                            print(f"Retry attempt {attempt} for {file['Name']} after error: {e}")
-                            print("Retrying with large upload...")
+                            orchestrator_connection.log_info(f"Retry attempt {attempt} for {file['Name']} after error: {e}")
+                            orchestrator_connection.log_info("Retrying with large upload...")
 
                             if folder_path not in created_folders:
-                                print(f"Creating folder: {folder_path}")
+                                orchestrator_connection.log_info(f"Creating folder: {folder_path}")
                                 create_and_delete_placeholder(
                                     go_api_url,
                                     case_id,
@@ -210,7 +204,7 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
                             if attempt == max_retries:
                                 raise retry_exception  
                             else:
-                                print(f"Retry {attempt} failed: {retry_exception}")
+                                orchestrator_connection.log_info(f"Retry {attempt} failed: {retry_exception}")
 
             # Sort files by ascending order of their filenames
             folder_doc_ids.sort(key=lambda x: x[1])
@@ -222,10 +216,9 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, usernam
             if doc_ids_for_journalization:
                 try:
                     journalize_documents(go_api_url, doc_ids_for_journalization, session, orchestrator_connection)
-                    print(f"Successfully journalized documents for subfolder {folder_path}: {doc_ids_for_journalization}")
+                    orchestrator_connection.log_info(f"Successfully journalized documents for subfolder {folder_path}: {doc_ids_for_journalization}")
                 except Exception as e:
-                    print(f"Failed to journalize documents for subfolder {folder_path}: {e}")
-
+                    orchestrator_connection.log_info(f"Failed to journalize documents for subfolder {folder_path}: {e}")
 
 # Journalize the uploaded documents
 def journalize_documents(go_api_url, doc_ids, session: requests.session, orchestrator_connection: OrchestratorConnection):
@@ -234,9 +227,9 @@ def journalize_documents(go_api_url, doc_ids, session: requests.session, orchest
         url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
         response = session.post(url, data=json.dumps(payload), headers={"Content-Type": "application/json"})
         response.raise_for_status()
-        print("Documents journalized successfully.")
+        orchestrator_connection.log_info("Documents journalized successfully.")
     except Exception as e:
-        print(f"Failed to journalize documents: {e}")
+        orchestrator_connection.log_info(f"Failed to journalize documents: {e}")
         
 def delete_document_go(go_api_url, doc_id, session: requests.session):
     url = f"{go_api_url}/_goapi/Documents/ByDocumentId"
@@ -274,28 +267,28 @@ def create_and_delete_placeholder(go_api_url, case_id, folder_path, session: req
 
     try:
         # Upload the placeholder file
-        print("Uploading placeholder file...")
+        orchestrator_connection.log_info("Uploading placeholder file...")
         upload_response = upload_document_go(go_api_url, payload, session)
         doc_id = upload_response.get("DocId")
-        print(f"Placeholder file uploaded with DocId: {doc_id}")
+        orchestrator_connection.log_info(f"Placeholder file uploaded with DocId: {doc_id}")
 
         # Delete the placeholder file
-        print("Deleting placeholder file...")
+        orchestrator_connection.log_info("Deleting placeholder file...")
         delete_document_go(go_api_url, doc_id, session)
 
     except Exception as e:
-        print(f"Error during create/delete placeholder operation: {e}")
+        orchestrator_connection.log_info(f"Error during create/delete placeholder operation: {e}")
         
 #Below is for uploading large/failed files
 def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_digest, folder_path, orchestrator_connection: OrchestratorConnection):
-    print(f'Folder path: {folder_path}')
-    print(f'File name: {file_name}')
+    orchestrator_connection.log_info(f'Folder path: {folder_path}')
+    orchestrator_connection.log_info(f'File name: {file_name}')
     chunk_size_bytes = 1024 * 10240
     session.headers.update({
         'X-FORMS_BASED_AUTH_ACCEPTED': 'f',
         'X-RequestDigest': request_digest
     })
-    print(request_digest)
+    orchestrator_connection.log_info(request_digest)
 
     web_url = APIURL+"/"+case_url
     if folder_path is not None:
@@ -305,8 +298,6 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
         
     create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl=@p)/Files/add(url=@f,overwrite=true)?@p='{target_folder_url}'&@f='{file_name}'"
 
-
-    #create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl='{target_folder_url}')/Files/add(url='{file_name}',overwrite=true)"
     response = session.post(create_file_request_url)
     response.raise_for_status()  # Ensure file creation is successful
 
@@ -328,15 +319,13 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
                 # If the file fits in a single chunk, handle it differently
                 # StartUpload and FinishUpload in one step
                 endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
-
-                
-                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
-                print(endpoint_url)
+                orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
 
                 endpoint_url =  f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
-                print(endpoint_url)
+         
+                orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
                 break  # Upload complete
@@ -344,25 +333,20 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
                 # StartUpload: Initiating the upload session for large files
                 endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
 
-                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/startUpload(uploadId=guid'{upload_id}')"
-                print(endpoint_url)
+                orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
                 first_chunk = False
             elif input_stream.tell() == total_size:
                 # FinishUpload: Upload the final chunk for large files
                 endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
-
-                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
-                print(endpoint_url)
+                orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
             else:
                 # ContinueUpload: Upload subsequent chunks
                 endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
-
-                #endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl='{target_url}')/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})"
-                print(endpoint_url)
+                orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
 
@@ -380,7 +364,7 @@ def request_form_digest(APIURL, case_url, session: requests.session):
     return data['d']['GetContextWebInformation']['FormDigestValue']
 
 def get_docid(file_name, APIURL, case_url, folder_path, session: requests.session, orchestrator_connection: OrchestratorConnection):
-    print(f'Fetching doc_id for {file_name}')
+    orchestrator_connection.log_info(f'Fetching doc_id for {file_name}')
 
     sags_url = f'{APIURL}/{case_url}/_goapi/Administration/GetLeftMenuCounter'
 
@@ -409,8 +393,6 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     headers = {
         'content-type': 'application/json;odata=verbose'
     }
-
-
 
     url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={ViewId}&RootFolder={root_folder}"
 
@@ -445,21 +427,21 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
 
         for row in data.get('Row', []):
             if str(row.get('FileLeafRef')).lower() == str(file_name).lower():
-                print(f'DocID: {row.get("DocID")}')
+                orchestrator_connection.log_info(f'DocID: {row.get("DocID")}')
                 return row.get('DocID')
 
         next_href = data.get('NextHref')
         if next_href:
             next_href = next_href.replace("?", "&", 1)
             url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}{next_href}"
-            print(f"Fetching next page: {url}")
+            orchestrator_connection.log_info(f"Fetching next page: {url}")
         else:
-            print("DocID not found.")
+            orchestrator_connection.log_info("DocID not found.")
             return None 
 
 # Example usage
 def chunk_uploaded(offset, total_size, orchestrator_connection: OrchestratorConnection):
-    print(f"Uploaded {offset} out of {total_size} bytes")
+    orchestrator_connection.log_info(f"Uploaded {offset} out of {total_size} bytes")
 
 def get_case_type(APIURL, session, case_id):
     response = session.get(f"{APIURL}/_goapi/Cases/Metadata/{case_id}/False")
@@ -516,17 +498,26 @@ def upload_large_document(APIURL, payload, session, binary, orchestrator_connect
         return 'Failed to get DocId'
         
 orchestrator_connection = OrchestratorConnection("AktbobJournaliser", os.getenv('OpenOrchestratorSQL'),os.getenv('OpenOrchestratorKey'), None)
+orchestrator_connection.log_trace("Running process.")
 sharepoint_site_url = orchestrator_connection.get_constant("AktbobSharePointUrl").value
 go_api_url = orchestrator_connection.get_constant("GOApiURL").value
 go_api_login = orchestrator_connection.get_credential("GOAktApiUser")
-robot_user = orchestrator_connection.get_credential("Robot365User")
-username = robot_user.username
-password = robot_user.password
-
+certification = orchestrator_connection.get_credential("SharePointCert")
+api = orchestrator_connection.get_credential("SharePointAPI")
 go_username = go_api_login.username
 go_password = go_api_login.password
+
+tenant = api.username
+client_id = api.password
+thumbprint = certification.username
+cert_path = certification.password
+
 json_queue = json.loads("""{
-queue element from pyorchestrator
+    "Aktindsigtssag": "AKT-2025-000972",
+    "Email": "ndaka@aarhus.dk",
+    "Navn": "Karoline Dahl Nielsen",
+    "DeskproID": 2450,
+    "Overmappenavn": "2450 - Aktindsigt Byggesag S2024-59960"
 }""")
 Overmappenavn = json_queue.get("Overmappenavn")
 Aktindsigtssag = json_queue.get("Aktindsigtssag")
@@ -534,9 +525,7 @@ Aktindsigtssag = json_queue.get("Aktindsigtssag")
 sharepoint_folders = [
 #f"Delte dokumenter/Dokumentlister/{Overmappenavn}",
 f"Delte dokumenter/Aktindsigter/{Overmappenavn}"
-    ]
+]
 session = create_session(go_api_url, go_username, go_password)
 
-process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, username, password, session, orchestrator_connection, Aktindsigtssag)
-
-
+process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, tenant, client_id, thumbprint, cert_path, session, orchestrator_connection, Aktindsigtssag)

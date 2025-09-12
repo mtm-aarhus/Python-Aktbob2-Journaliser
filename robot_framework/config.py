@@ -2,6 +2,7 @@
 
 # The number of times the robot retries on an error before terminating.
 MAX_RETRY_COUNT = 3
+QUEUE_ATTEMPTS = 2
 
 # Whether the robot should be marked as failed if MAX_RETRY_COUNT is reached.
 FAIL_ROBOT_ON_TOO_MANY_ERRORS = False

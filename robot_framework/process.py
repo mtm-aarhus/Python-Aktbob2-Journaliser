@@ -128,6 +128,9 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, tenant,
 
     created_folders = set()  # Keep track of created folders
     today_date = datetime.now().strftime("%d-%m-%Y")
+    
+    timestamp = time.time()  
+
 
     for folder_url in folders:
         orchestrator_connection.log_info(f"Processing top-level folder: {folder_url}")
@@ -148,6 +151,12 @@ def process_sharepoint_folders(sharepoint_site_url, folders, go_api_url, tenant,
             folder_doc_ids = []
 
             for file in folder_files:
+                elapsed = time.time() - timestamp
+                if elapsed >= 30 * 60:  # 30 minutes in seconds
+                    print("30 minutes passed, fetching new SharePoint Client and resetting timestamp.")
+                    ctx = sharepoint_client(tenant, client_id, thumbprint, cert_path,sharepoint_site_url, orchestrator_connection)
+
+                    timestamp = time.time()
                 orchestrator_connection.log_info(f"Uploading file: {file['Name']} in {folder_path}")
 
                 # Download the file content
@@ -422,8 +431,6 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
     headers = {
         'content-type': 'application/json;odata=verbose'
     }
-
-
 
     url = f"{APIURL}/{case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={ViewId}&RootFolder={root_folder}"
 
