@@ -137,7 +137,7 @@ def fetch_deskpro_title(DeskProID: str,DeskProAPIKey) -> str:
     url = f"https://mtmsager.aarhuskommune.dk/api/v2/tickets/{DeskProID}"
     headers = {
         'Authorization': DeskProAPIKey,
-        'Cookie': '_cfuvid=wEbJZb6L2Q0D_.wJ2KUUxNuNCTI6HVNzphzO60lWlpA-1776939772475-0.0.1.1-604800000; dp_last_lang=da'
+        'Cookie': 'dp_last_lang=da'
     }
     response = requests.get(url, headers=headers)
     response.raise_for_status()
