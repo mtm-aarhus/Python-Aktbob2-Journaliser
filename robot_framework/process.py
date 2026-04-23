@@ -29,7 +29,10 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     api = orchestrator_connection.get_credential("SharePointAPI")
     go_username = go_api_login.username
     go_password = go_api_login.password
-    
+    DeskProAPI = orchestrator_connection.get_credential("DeskProAPI") 
+    DeskProAPIKey = DeskProAPI.password  
+
+
     tenant = api.username
     client_id = api.password
     thumbprint = certification.username
@@ -38,12 +41,22 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     json_queue = json.loads(queue_element.data)
     Overmappenavn = json_queue.get("Overmappenavn")
     Aktindsigtssag = json_queue.get("Aktindsigtssag")
-
+    DeskProID = json_queue.get("DeskproID")
+    
     sharepoint_folders = [
     #f"Delte dokumenter/Dokumentlister/{Overmappenavn}",
     f"Delte dokumenter/Aktindsigter/{Overmappenavn}"
     ]
     session = create_session(go_api_url, go_username, go_password)
+
+    # --- NEW: Fetch DeskPro title and update GO case title ---
+    try:
+        new_title = fetch_deskpro_title(DeskProID, DeskProAPIKey)
+        update_case_title(go_api_url, Aktindsigtssag, new_title, session, orchestrator_connection)
+    except Exception as e:
+        orchestrator_connection.log_info(f"Failed to update case title from DeskPro: {e}")
+    # ---------------------------------------------------------
+
 
     process_sharepoint_folders(sharepoint_site_url, sharepoint_folders, go_api_url, tenant, client_id, thumbprint, cert_path, session, orchestrator_connection, Aktindsigtssag)
     
@@ -119,6 +132,31 @@ def create_session (APIURL, Username, PasswordString):
     session.auth = HttpNtlmAuth(Username, PasswordString)
     session.post(APIURL, timeout=500)
     return session
+
+def fetch_deskpro_title(DeskProID: str,DeskProAPIKey) -> str:
+    url = f"https://mtmsager.aarhuskommune.dk/api/v2/tickets/{DeskProID}"
+    headers = {
+        'Authorization': DeskProAPIKey,
+        'Cookie': '_cfuvid=wEbJZb6L2Q0D_.wJ2KUUxNuNCTI6HVNzphzO60lWlpA-1776939772475-0.0.1.1-604800000; dp_last_lang=da'
+    }
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    subject = response.json()["data"]["subject"]
+    return f"{subject} [DeskProID: {DeskProID}]"
+
+
+def update_case_title(go_api_url: str, case_id: str, new_title: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
+    """Updates the title (ows_Title) of a GO case via the Metadata endpoint."""
+    metadata_xml = f'<z:row xmlns:z="#RowsetSchema" ows_Title="{new_title}"/>'
+    payload = {
+        "CaseId": case_id,
+        "MetadataXml": metadata_xml
+    }
+    url = f"{go_api_url}/_goapi/Cases/Metadata"
+    response = session.post(url, json=payload, timeout=600)
+    response.raise_for_status()
+    orchestrator_connection.log_info(f"Case title updated to: {new_title}")
+
 
 def print_download_progress(offset, orchestrator_connection: OrchestratorConnection):
     orchestrator_connection.log_info("Downloaded '{0}' bytes...".format(offset))
