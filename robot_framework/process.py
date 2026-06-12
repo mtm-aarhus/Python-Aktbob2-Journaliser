@@ -16,6 +16,7 @@ import os
 import json
 import uuid
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 
 # pylint: disable-next=unused-argument
@@ -354,6 +355,25 @@ def create_and_delete_placeholder(go_api_url, case_id, folder_path, session: req
 
     except Exception as e:
         orchestrator_connection.log_info(f"Error during create/delete placeholder operation: {e}")
+
+def odata_string_literal(value) -> str:
+    escaped_value = str(value).replace("'", "''")
+    return "'" + escaped_value + "'"
+
+def build_sharepoint_alias_url(base_url: str, aliases: dict) -> str:
+    query_parts = []
+    for name, value in aliases.items():
+        encoded_value = quote(odata_string_literal(value), safe="'/-_.~")
+        query_parts.append(f"{name}={encoded_value}")
+    query = "&".join(query_parts)
+    return f"{base_url}?{query}"
+
+def build_document_folder_url(case_url: str, folder_path: str | None) -> str:
+    root_folder = f"/{str(case_url).strip('/')}/Dokumenter"
+    normalized_folder_path = (folder_path or "").replace("\\", "/").strip("/")
+    if normalized_folder_path:
+        return f"{root_folder}/{normalized_folder_path}"
+    return root_folder
         
 #Below is for uploading large/failed files
 def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_digest, folder_path, orchestrator_connection: OrchestratorConnection):
@@ -366,18 +386,20 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
     })
     orchestrator_connection.log_info(request_digest)
 
-    web_url = APIURL+"/"+case_url
-    if folder_path is not None:
-        target_folder_url = f"/{case_url}/Dokumenter/{folder_path}".replace("\\", "/")
-    else:
-        target_folder_url = f"/{case_url}/Dokumenter"
-        
-    create_file_request_url = f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl=@p)/Files/add(url=@f,overwrite=true)?@p='{target_folder_url}'&@f='{file_name}'"
+    web_url = f"{APIURL.rstrip('/')}/{str(case_url).strip('/')}"
+    target_folder_url = build_document_folder_url(case_url, folder_path)
+    create_file_request_url = build_sharepoint_alias_url(
+        f"{web_url}/_api/web/GetFolderByServerRelativePath(DecodedUrl=@p)/Files/add(url=@f,overwrite=true)",
+        {
+            "@p": target_folder_url,
+            "@f": file_name
+        }
+    )
 
     response = session.post(create_file_request_url)
     response.raise_for_status()  # Ensure file creation is successful
 
-    target_url = f"{target_folder_url}%2F{file_name}"
+    target_url = f"{target_folder_url}/{file_name}"
 
     upload_id = str(uuid.uuid4())  # Unique upload session ID
     offset = 0
@@ -394,12 +416,18 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
             if first_chunk and len(buffer) == total_size:
                 # If the file fits in a single chunk, handle it differently
                 # StartUpload and FinishUpload in one step
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
+                endpoint_url = build_sharepoint_alias_url(
+                    f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')",
+                    {"@u": target_url}
+                )
                 orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
 
-                endpoint_url =  f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
+                endpoint_url = build_sharepoint_alias_url(
+                    f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})",
+                    {"@u": target_url}
+                )
          
                 orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
@@ -407,7 +435,10 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
                 break  # Upload complete
             elif first_chunk:
                 # StartUpload: Initiating the upload session for large files
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')?@u='{target_url}'"
+                endpoint_url = build_sharepoint_alias_url(
+                    f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/startUpload(uploadId=guid'{upload_id}')",
+                    {"@u": target_url}
+                )
 
                 orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
@@ -415,13 +446,19 @@ def chunked_file_upload(APIURL, case_url, binary, file_name, session, request_di
                 first_chunk = False
             elif input_stream.tell() == total_size:
                 # FinishUpload: Upload the final chunk for large files
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
+                endpoint_url = build_sharepoint_alias_url(
+                    f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/finishUpload(uploadId=guid'{upload_id}',fileOffset={offset})",
+                    {"@u": target_url}
+                )
                 orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
             else:
                 # ContinueUpload: Upload subsequent chunks
-                endpoint_url = f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})?@u='{target_url}'"
+                endpoint_url = build_sharepoint_alias_url(
+                    f"{web_url}/_api/web/GetFileByServerRelativePath(DecodedUrl=@u)/continueUpload(uploadId=guid'{upload_id}',fileOffset={offset})",
+                    {"@u": target_url}
+                )
                 orchestrator_connection.log_info(endpoint_url)
                 response = session.post(endpoint_url, data=buffer)
                 response.raise_for_status()
@@ -460,11 +497,7 @@ def get_docid(file_name, APIURL, case_url, folder_path, session: requests.sessio
 
 
     list_url = f"'/{case_url}/Dokumenter'"
-    if folder_path is None:
-        root_folder = f"/{case_url}/Dokumenter"
-    else:
-        folder_path = folder_path.replace("''", "'")
-        root_folder = f"/{case_url}/Dokumenter/{folder_path}"
+    root_folder = build_document_folder_url(case_url, folder_path)
 
     headers = {
         'content-type': 'application/json;odata=verbose'
@@ -560,8 +593,6 @@ def upload_large_document(APIURL, payload, session, binary, orchestrator_connect
     metadata = payload["Metadata"]
     case_url = get_case_type(APIURL, session, case_id)
     request_digest = request_form_digest(APIURL, case_url, session)
-    file_name = file_name.replace("'", "''")
-    folder_path = folder_path.replace("'", "''")
 
     chunked_file_upload(APIURL, case_url, binary, file_name, session, request_digest, folder_path, orchestrator_connection)
     time.sleep(5)
