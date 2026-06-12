@@ -143,7 +143,7 @@ def fetch_deskpro_title(DeskProID: str,DeskProAPIKey) -> str:
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     subject = response.json()["data"]["subject"]
-    return f"Aktindsigt: {subject} [Deskpro: {DeskProID}]"
+    return f"{subject} [Deskpro: {DeskProID}]"
 
 
 def update_case_title(go_api_url: str, case_id: str, new_title: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
