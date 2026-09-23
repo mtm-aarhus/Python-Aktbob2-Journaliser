@@ -29,8 +29,8 @@ raw_json = """{
     "Aktindsigtssag": "AKT-2026-000qwe",
     "Email": "testuser@aarhus.dk",
     "Navn": "Testbruger",
-    "DeskproID": 3264,
-    "Overmappenavn": "3264 - Aktindsigt I materiale til historiske redegørelser for Region Midtjylland - for i alt 6 (...)"
+    "DeskproID": 1234,
+    "Overmappenavn": "1234 - 1234"
 }"""
 
 payload = json.loads(raw_json)
