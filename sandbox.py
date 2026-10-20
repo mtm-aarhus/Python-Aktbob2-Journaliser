@@ -26,11 +26,7 @@ def make_queue_element_with_payload(
     )
 
 raw_json = """{
-    "Aktindsigtssag": "AKT-2026-000qwe",
-    "Email": "testuser@aarhus.dk",
-    "Navn": "Testbruger",
-    "DeskproID": 1234,
-    "Overmappenavn": "1234 - 1234"
+"INDSÆT RAW JSON": HER
 }"""
 
 payload = json.loads(raw_json)

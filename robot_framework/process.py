@@ -105,10 +105,17 @@ def fetch_files_in_folder(ctx: ClientContext, folder_url, base_folder=""):
 
     return files_array
 
+def build_metadata_xml(ows_dict: dict) -> str:
+    """Serialize GO metadata, escaping special characters in attribute values."""
+    row = ET.Element("z:row", {"xmlns:z": "#RowsetSchema"})
+    for key, value in ows_dict.items():
+        row.set(f"ows_{key}", str(value))
+    return ET.tostring(row, encoding="unicode")
+
+
 # Create payload for document upload
 def make_payload_document(ows_dict: dict, caseID: str, FolderPath: str, byte_arr: list, filename):
-    ows_str = ' '.join([f'ows_{k}="{v}"' for k, v in ows_dict.items()])
-    MetaDataXML = f'<z:row xmlns:z="#RowsetSchema" {ows_str}/>'
+    MetaDataXML = build_metadata_xml(ows_dict)
 
     return {
         "Bytes": byte_arr,
@@ -148,7 +155,7 @@ def fetch_deskpro_title(DeskProID: str,DeskProAPIKey) -> str:
 
 def update_case_title(go_api_url: str, case_id: str, new_title: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     """Updates the title (ows_Title) of a GO case via the Metadata endpoint."""
-    metadata_xml = f'<z:row xmlns:z="#RowsetSchema" ows_Title="{new_title}"/>'
+    metadata_xml = build_metadata_xml({"Title": new_title})
     payload = {
         "CaseId": case_id,
         "MetadataXml": metadata_xml
@@ -328,8 +335,7 @@ def create_and_delete_placeholder(go_api_url, case_id, folder_path, session: req
         "Beskrivelse": "Leveret af Aktbob",
         "CCMMustBeOnPostList": "0"
     }
-    metadata_xml = ' '.join([f'ows_{k}="{v}"' for k, v in ows_dict.items()])
-    metadata = f'<z:row xmlns:z="#RowsetSchema" {metadata_xml}/>'
+    metadata = build_metadata_xml(ows_dict)
 
     # Create the payload for uploading the placeholder file
     payload = {
